@@ -10,9 +10,9 @@ metadata({
 		capability("Battery"); // http://docs.smartthings.com/en/latest/capabilities-reference.html#battery
         capability("Lock"); // http://docs.smartthings.com/en/latest/capabilities-reference.html#lock
 		capability("Refresh"); // http://docs.smartthings.com/en/latest/capabilities-reference.html#refresh
+        capability("Switch Level"); // http://docs.smartthings.com/en/latest/capabilities-reference.html#switch-level
 
-		fingerprint(profileId: "0104", // Home Automation: http://docs.smartthings.com/en/latest/device-type-developers-guide/definition-metadata.html#fingerprinting
-        			// Cluster Definitions: http://www.zigbee.org/download/standards-zigbee-cluster-library/
+		fingerprint(profileId: homeAutomationProfile(),
         			inClusters: [powerConfigurationCluster(),
                     			 doorLockCluster()
                                  ].join(" "),
@@ -35,11 +35,18 @@ metadata({
         valueTile("lock", "device.lock", inactiveLabel: false, decoration: "flat", {
         	state("lock", label:'${currentValue}', unit:"");
         });
+        
+        valueTile("level", "device.level", inactiveLabel: false, decoration: "flat", {
+        	state("level", label:'${currentValue}', unit:"");
+        });
  
  		main("refresh");
- 		details(["refresh", "battery", "lock"]);
+ 		details(["refresh", "battery", "lock", "level"]);
  	});
 });
+
+ // http://docs.smartthings.com/en/latest/device-type-developers-guide/definition-metadata.html#fingerprinting
+private homeAutomationProfile() { return "0104"; }
 
 private analogInputCluster() { return "000C"; }
 
@@ -50,6 +57,7 @@ private doorLockCluster() { return "0101"; }
 private lockStateAttribute() { return "0000"; }
 private doorStateAttribute() { return "0003"; }
 
+// Defined in http://www.silabs.com/Support%20Documents/TechnicalDocs/AF-V2-API.pdf
 private dataTypes()
 {
 	return [
@@ -59,12 +67,15 @@ private dataTypes()
     ];
 }
 
-def parse(String description) {
+def parse(String description)
+{
     log.trace("parse(String) - Enter: ${description}");
     
     def result = [];
-    if (description) {
-    	if (description.startsWith("read attr - ")) {
+    if (description)
+    {
+    	if (description.startsWith("read attr - "))
+        {
             Map<String,String> descriptionMap = (description - "read attr - ").split(",").inject([:], { map, param ->
                 def nameAndValue = param.split(":")
                 map += [(nameAndValue[0].trim()):nameAndValue[1].trim()]
@@ -200,6 +211,66 @@ def parse(String description) {
             else
             {
             	log.warn("Unrecognized cluster: ${descriptionMap.cluster}");
+            }
+        }
+        else if (description.startsWith("catchall:"))
+        {
+         	def catchall = zigbee.parse(description);
+            
+            String profileId = Integer.toHexString(catchall.profileId).padLeft(4, "0");
+            if (profileId == homeAutomationProfile())
+            {
+            	String clusterId = Integer.toHexString(catchall.clusterId).padLeft(4, "0");
+                if (clusterId == doorLockCluster())
+                {
+                	String command = Integer.toHexString(catchall.command).padLeft(4, "0");
+                    if (command == "0020")
+                    {
+                    	def lockModeByte = catchall.data[1];
+                    	def lockModeHex = Integer.toHexString(lockModeByte).padLeft(2, "0");
+                        String lockMode;
+                        if (lockModeHex == "0d")
+                        {
+                        	lockMode = "Locked";
+                        }
+                        else if (lockModeHex == "0e")
+                        {
+                        	lockMode = "Unlocked";
+                        }
+                        else if (lockModeHex == "0a")
+                        {
+                        	lockMode = "Automatic";
+                        }
+                        else
+                        {
+                        	log.warn("Unrecognized LockMode: ${lockModeHex}");
+                        }
+                        
+                        if (lockMode == "Locked" || lockMode == "Unlocked" || lockMode == "Automatic")
+                        {
+                        	def lockModeResult = [:];
+                            lockModeResult.name = "level";
+                            lockModeResult.value = lockModeByte;
+                            lockModeResult.descriptionText = "${getLinkText(device)} mode is ${lockMode}";
+                            result = createEvent(lockModeResult);
+
+                            log.debug("LockMode: ${lockMode}");
+                            log.info(lockModeResult.descriptionText);
+                        }
+                    }
+                    else
+                    {
+                    	log.warn("Unrecognized doorLockCluster command: ${command}");
+                    }
+                }
+                else
+                {
+                	log.warn("Unrecognized clusterId: ${clusterId}");
+                }
+            }
+            else
+            {
+            	log.warn("Unrecognized profileId: ${profileId}");
             }
         }
         else

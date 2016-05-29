@@ -19,6 +19,26 @@ metadata({
                     outClusters: [].join(" ")
                    );
 	});
+    
+    simulator({
+    });
+    
+    tiles({
+ 		standardTile("refresh", "device.lock", inactiveLabel: false, decoration: "flat", {
+ 			state("default", label:'', action:"refresh.refresh", icon:"st.secondary.refresh");
+ 		});
+        
+ 		valueTile("battery", "device.battery", inactiveLabel: false, decoration: "flat", {
+ 			state("battery", label:'${currentValue}% battery', unit:"");
+ 		});
+        
+        valueTile("lock", "device.lock", inactiveLabel: false, decoration: "flat", {
+        	state("lock", label:'${currentValue}', unit:"");
+        });
+ 
+ 		main("refresh");
+ 		details(["refresh", "battery", "lock"]);
+ 	});
 });
 
 private analogInputCluster() { return "000C"; }
@@ -28,6 +48,16 @@ private batteryVoltageAttribute() { return "0020"; }
 
 private doorLockCluster() { return "0101"; }
 private lockStateAttribute() { return "0000"; }
+private doorStateAttribute() { return "0003"; }
+
+private dataTypes()
+{
+	return [
+        unsignedInteger8Bit: "20",
+        
+    	enumeration8Bit: "30"
+    ];
+}
 
 def parse(String description) {
     log.trace("parse(String) - Enter: ${description}");
@@ -64,14 +94,15 @@ def parse(String description) {
                     {
                     	deviceBatteryPercetange = 100;
                     }
-                    log.debug("Device battery percetange: ${deviceBatteryPercentage}");
                     
                     def batteryResult = [:];
                     batteryResult.name = "battery";
                     batteryResult.value = deviceBatteryPercentage;
                     batteryResult.descriptionText = "${getLinkText(device)} battery is at ${deviceBatteryPercentage}%";
-                    			
                     result = createEvent(batteryResult);
+                    
+                    log.debug("BatteryVoltage: ${deviceBatteryVoltage}");
+                    log.info(batteryResult.descriptionText);
                 }
                 else
                 {
@@ -82,26 +113,83 @@ def parse(String description) {
             {
             	if (descriptionMap.attrId == lockStateAttribute())
                 {
-                	def lockStateResult = [:];
-                    lockStateResult.name = "lock";
-                	if (descriptionMap.value == "01")
+                	String lockState;
+                    if (descriptionMap.value == "00")
                     {
-                    	lockStateResult.value = "locked";
+                    	lockState = "Not fully locked";
+                    }
+                	else if (descriptionMap.value == "01")
+                    {
+                    	lockState = "Locked";
                     }
                     else if(descriptionMap.value == "02")
                     {
-                    	lockStateResult.value = "unlocked";
+                    	lockState = "Unlocked";
+                    }
+                    else if(descriptionMap.value == "ff")
+                    {
+                    	lockState = "not defined";
                     }
                     else
                     {
-                    	log.warn("Unrecognized lockStateAttribute value: ${descriptionMap.value}");
+                    	lockState = "Reserved (${descriptionMap.value})";
                     }
                     
-                    if (lockStateResult.value)
+                    if (lockState == "Locked" || lockState == "Unlocked")
                     {
-                    	log.debug("Valid lockStateResult.value: ${lockStateResult.value}");
-                    	lockStateResult.descriptionText = "${getLinkText(device)} door is ${lockStateResult.value}";
-                    	result = createEvent(lockStateResult);
+                    	def lockStateResult = [:];
+                    	lockStateResult.name = "lock";
+                        lockStateResult.value = lockState.toLowerCase();
+                    	lockStateResult.descriptionText = "${getLinkText(device)} is ${lockState}";
+                        result = createEvent(lockStateResult);
+                        
+                        log.debug("LockState: ${lockState}");
+                        log.info(lockStateResult.descriptionText);
+                    }
+                    else
+                    {
+                    	log.warn("Unrecognized LockState: ${lockState}");
+                    }
+                }
+                else if (descriptionMap.attrId == doorStateAttribute())
+                {
+                	String doorState;
+                    if (descriptionMap.value == "00")
+                    {
+                    	doorState = "Open";
+                    }
+                    else if (descriptionMap.value == "01")
+                    {
+                    	doorState = "Closed";
+                    }
+                    else if (descriptionMap.value == "02")
+                    {
+                    	doorState = "Error (jammed)";
+                    }
+                    else if (descriptionMap.value == "03")
+                    {
+                    	doorState = "Error (forced open)";
+                    }
+                    else if (descriptionMap.value == "04")
+                    {
+                    	doorState = "Error (unspecified)";
+                    }
+                    else if (descriptionMap.value == "ff")
+                    {
+                    	doorState = "not defined";
+                    }
+                    else
+                    {
+                    	doorState = "Reserved (${descriptionMap.value})";
+                    }
+                    
+                    if (doorState == "Open" || doorState == "Closed" || doorState.startsWith("Error"))
+                    {
+                    	log.debug("DoorState: ${doorState}");
+                    }
+                    else
+                    {
+                    	log.warn("Unrecognized DoorState: ${doorState}");
                     }
                 }
                 else
@@ -145,7 +233,22 @@ def configure()
 {
 	log.trace("configure() - Enter");
     
-    def result = [];
+    def result = [
+    	//Lock Reporting
+        "zcl global send-me-a-report 0x${doorLockCluster()} 0x${lockStateAttribute()} 0x${dataTypes().enumeration8Bit} 0 300 {01}",
+        "delay 500",
+        "send 0x${device.deviceNetworkId} 1 1",
+        "delay 1000",
+		"zdo bind 0x${device.deviceNetworkId} 0x0C 0x01 0x${doorLockCluster()} {${device.zigbeeId}} {}",
+        "delay 500",
+        
+        //Battery Reporting
+        "zcl global send-me-a-report 0x${powerConfigurationCluster()} 0x${batteryVoltageAttribute()} 0x${dataTypes().unsignedInteger8Bit} 0 300 {}",
+        "delay 500",
+        "send 0x${device.deviceNetworkId} 1 1",
+        "delay 500",
+        "zdo bind 0x${device.deviceNetworkId} 0x0C 0x01 0x${powerConfigurationCluster()} {${device.zigbeeId}} {}"
+    ];
     
     log.trace("configure() - Exit: ${result}");
     
@@ -182,8 +285,10 @@ def refresh()
     
     def result = [
     				"st rattr 0x${device.deviceNetworkId} 0x${analogInputCluster()} 0x${powerConfigurationCluster()} 0x${batteryVoltageAttribute()}",
-                    "delay 1000",
-                    "st rattr 0x${device.deviceNetworkId} 0x${analogInputCluster()} 0x${doorLockCluster()} 0x${lockStateAttribute()}"
+                    "delay 500",
+                    "st rattr 0x${device.deviceNetworkId} 0x${analogInputCluster()} 0x${doorLockCluster()} 0x${lockStateAttribute()}",
+                    "delay 500",
+                    "st rattr 0x${device.deviceNetworkId} 0x${analogInputCluster()} 0x${doorLockCluster()} 0x${doorStateAttribute()}"
     			 ];
     
     log.trace("refresh() - Exit: ${result}");

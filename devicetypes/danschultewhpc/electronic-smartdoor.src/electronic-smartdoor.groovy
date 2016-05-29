@@ -151,7 +151,7 @@ def parse(String description)
                     	def lockStateResult = [:];
                     	lockStateResult.name = "lock";
                         lockStateResult.value = lockState.toLowerCase();
-                    	lockStateResult.descriptionText = "${getLinkText(device)} is ${lockState}";
+                    	lockStateResult.descriptionText = "${getLinkText(device)} door is ${lockState}";
                         result = createEvent(lockStateResult);
                         
                         log.debug("LockState: ${lockState}");
@@ -365,4 +365,16 @@ def refresh()
     log.trace("refresh() - Exit: ${result}");
     
 	return result;
+}
+
+capability("Switch Level"); // http://docs.smartthings.com/en/latest/capabilities-reference.html#switch-level
+def setLevel(level, rate)
+{
+	log.trace("setLevel(level, rate) - Enter: level(${level}), rate(${rate})");
+    
+    def result = [];
+    
+    log.trace("setLevel(level, rate) - Exit: ${result}");
+    
+    return result;
 }
